@@ -1,4 +1,11 @@
 <resources>
     <string name="app_name">PhototEditingSoftware</string>
     <string name="continue_btn">Continue</string>
+    <string name="generate_print_sheet_jpg">Generate Print Sheet (JPG)</string>
+    <string name="number_of_copies">Number of Copies</string>
+    <string name="select_document_format">Select Document Format</string>
+    <string name="lighting">Lighting</string>
+    <string name="crop">Crop</string>
+    <string name="remove_bg">Remove BG</string>
+    <string name="user_selected_photo">User Selected Photo</string>
 </resources>

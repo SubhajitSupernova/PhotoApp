@@ -14,10 +14,6 @@ class BrightnessHelper(private val context: Context) {
     private var currentBrightness = 1.0f
     private var currentScale = 1.0f
 
-    /**
-     * @param onUpdate: provides (ColorFilter, ScaleFactor) for real-time hardware-accelerated preview
-     * @param onFinalize: provides the actual resized/brightened Bitmap once the user clicks Done
-     */
     fun showBrightnessDialog(
         currentBitmap: Bitmap,
         onUpdate: (ColorMatrixColorFilter, Float) -> Unit,
@@ -33,14 +29,12 @@ class BrightnessHelper(private val context: Context) {
         val btnDone = view.findViewById<Button>(R.id.btnDone)
 
         fun updatePreview() {
-            // Create a ColorMatrix for brightness logic
             val cm = ColorMatrix(floatArrayOf(
                 currentBrightness, 0f, 0f, 0f, 0f,
                 0f, currentBrightness, 0f, 0f, 0f,
                 0f, 0f, currentBrightness, 0f, 0f,
                 0f, 0f, 0f, 1f, 0f
             ))
-            // Pass the filter and scale back to the activity
             onUpdate(ColorMatrixColorFilter(cm), currentScale)
         }
 
@@ -56,7 +50,6 @@ class BrightnessHelper(private val context: Context) {
 
         scaleSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
-                // Adjusting scale range: 0.5x to 2.0x
                 currentScale = (progress + 50) / 150f
                 scaleText.text = String.format("%.1fx", currentScale)
                 updatePreview()
@@ -66,9 +59,8 @@ class BrightnessHelper(private val context: Context) {
         })
 
         btnDone.setOnClickListener {
-            // High-cost operation performed ONLY ONCE here
-            val finalResult = applyFinalTransform(currentBitmap, currentBrightness, currentScale)
-            onFinalize(finalResult)
+            val result = applyFinalTransform(currentBitmap, currentBrightness, currentScale)
+            onFinalize(result)
             dialog.dismiss()
         }
 
@@ -77,8 +69,21 @@ class BrightnessHelper(private val context: Context) {
     }
 
     private fun applyFinalTransform(src: Bitmap, brightness: Float, scale: Float): Bitmap {
-        val newWidth = (src.width * scale).toInt().coerceAtLeast(1)
-        val newHeight = (src.height * scale).toInt().coerceAtLeast(1)
+        // Safety: Cap dimensions to 4096px to prevent OutOfMemory crashes
+        var newWidth = (src.width * scale).toInt().coerceAtLeast(1)
+        var newHeight = (src.height * scale).toInt().coerceAtLeast(1)
+
+        val maxDim = 4096
+        if (newWidth > maxDim || newHeight > maxDim) {
+            val ratio = src.width.toFloat() / src.height.toFloat()
+            if (newWidth > newHeight) {
+                newWidth = maxDim
+                newHeight = (maxDim / ratio).toInt()
+            } else {
+                newHeight = maxDim
+                newWidth = (maxDim * ratio).toInt()
+            }
+        }
 
         val dest = Bitmap.createBitmap(newWidth, newHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(dest)
@@ -90,7 +95,7 @@ class BrightnessHelper(private val context: Context) {
             0f, 0f, 0f, 1f, 0f
         ))
 
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG).apply {
             colorFilter = ColorMatrixColorFilter(cm)
         }
 

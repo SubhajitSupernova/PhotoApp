@@ -47,7 +47,6 @@ class EditingPage : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_editing_page)
-
         initViews()
         setupListeners()
     }
@@ -76,45 +75,48 @@ class EditingPage : AppCompatActivity() {
     }
 
     private fun setupListeners() {
-        // 1. Image Picking
         imageCard.setOnClickListener {
             val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
             startActivityForResult(intent, REQUEST_IMAGE_PICK)
         }
 
-        // 2. Optimized Brightness & Scale Dialog
         btnBrightness.setOnClickListener {
             modifiedBitmap?.let { bitmap ->
                 val helper = BrightnessHelper(this)
-
-                // Fixed: Passing all required parameters to avoid "No value passed" error
                 helper.showBrightnessDialog(bitmap,
                     onUpdate = { colorFilter, scaleFactor ->
-                        // Preview logic: Fast and uses no extra RAM
+                        // FAST PREVIEW: No bitmap creation here
                         imageView.colorFilter = colorFilter
                         imageView.scaleX = scaleFactor
                         imageView.scaleY = scaleFactor
                     },
                     onFinalize = { finalBitmap ->
-                        // Finalize logic: Only runs once when "Done" is clicked
-                        modifiedBitmap = finalBitmap
-                        imageView.setImageBitmap(finalBitmap)
+                        // 1. Keep reference to old bitmap
+                        val oldBitmap = modifiedBitmap
 
-                        // Clear the preview effects as they are now "burned" into the new bitmap
+                        // 2. Assign and set new bitmap
+                        modifiedBitmap = finalBitmap
+                        imageView.setImageBitmap(modifiedBitmap)
+
+                        // 3. Reset preview styles
                         imageView.colorFilter = null
                         imageView.scaleX = 1.0f
                         imageView.scaleY = 1.0f
+
+                        // 4. CRITICAL: Recycle old bitmap memory immediately
+                        if (oldBitmap != null && oldBitmap != finalBitmap && !oldBitmap.isRecycled) {
+                            oldBitmap.recycle()
+                        }
+                        System.gc() // Hint garbage collection
                     }
                 )
             } ?: showToast("Please upload an image first")
         }
 
-        // 3. AI Background Removal
         btnRemoveBg.setOnClickListener {
             if (modifiedBitmap != null) showAiPopup() else showToast("Please upload an image first")
         }
 
-        // 4. Export logic
         exportBtn.setOnClickListener {
             modifiedBitmap?.let { bitmap ->
                 val sizeLabel = sizeDropdown.text.toString()
@@ -131,7 +133,6 @@ class EditingPage : AppCompatActivity() {
             .setView(dialogView)
             .setCancelable(false)
             .create()
-
         loadingDialog?.window?.setBackgroundDrawableResource(android.R.color.transparent)
         loadingDialog?.show()
 
@@ -139,17 +140,23 @@ class EditingPage : AppCompatActivity() {
             applyStudioBackground()
             loadingDialog?.dismiss()
             showToast("Background refined by AI")
-        }, 3500)
+        }, 2000)
     }
 
     private fun applyStudioBackground() {
         modifiedBitmap?.let { src ->
-            val result = Bitmap.createBitmap(src.width, src.height, src.config ?: Bitmap.Config.ARGB_8888)
+            val oldBitmap = modifiedBitmap
+            val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(result)
             canvas.drawColor(Color.WHITE)
             canvas.drawBitmap(src, 0f, 0f, null)
+
             modifiedBitmap = result
             imageView.setImageBitmap(modifiedBitmap)
+
+            if (oldBitmap != null && oldBitmap != result && !oldBitmap.isRecycled) {
+                oldBitmap.recycle()
+            }
         }
     }
 
@@ -157,11 +164,15 @@ class EditingPage : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_IMAGE_PICK && resultCode == Activity.RESULT_OK) {
             data?.data?.let { uri ->
-                val bitmap = MediaStore.Images.Media.getBitmap(contentResolver, uri)
-                // Optimization: Ensure bitmap is mutable
-                modifiedBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+                val rawBitmap = MediaStore.Images.Media.getBitmap(contentResolver, uri)
+                // Ensure we use a mutable ARGB_8888 bitmap for processing
+                val old = modifiedBitmap
+                modifiedBitmap = rawBitmap.copy(Bitmap.Config.ARGB_8888, true)
                 imageView.setImageBitmap(modifiedBitmap)
                 imageView.setPadding(0, 0, 0, 0)
+
+                if (old != null && !old.isRecycled) old.recycle()
+                if (rawBitmap != modifiedBitmap && !rawBitmap.isRecycled) rawBitmap.recycle()
             }
         }
     }
@@ -186,7 +197,6 @@ class EditingPage : AppCompatActivity() {
         for (i in 0 until count) {
             canvas.drawBitmap(scaledItem, currentX.toFloat(), currentY.toFloat(), null)
             currentX += itemW + margin
-
             if (currentX + itemW > a4W) {
                 currentX = 100
                 currentY += itemH + margin
@@ -194,11 +204,14 @@ class EditingPage : AppCompatActivity() {
             if (currentY + itemH > a4H) break
         }
 
+        scaledItem.recycle() // Clean up the temp scaled image
+
         return try {
             val file = File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "PrintSheet_${System.currentTimeMillis()}.jpg")
             FileOutputStream(file).use { out ->
-                sheet.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                sheet.compress(Bitmap.CompressFormat.JPEG, 90, out)
             }
+            sheet.recycle() // Clean up A4 bitmap
             file
         } catch (e: Exception) {
             null

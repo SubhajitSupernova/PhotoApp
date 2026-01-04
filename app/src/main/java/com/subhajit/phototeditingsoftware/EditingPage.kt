@@ -178,6 +178,7 @@ class EditingPage : AppCompatActivity() {
         var currentY = 150
         val margin = 45
 
+
         for (i in 0 until count) {
             canvas.drawBitmap(scaledItem, currentX.toFloat(), currentY.toFloat(), null)
             currentX += itemW + margin
@@ -191,8 +192,12 @@ class EditingPage : AppCompatActivity() {
         return try {
             val file = File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Passport_${System.currentTimeMillis()}.jpg")
             FileOutputStream(file).use { out -> sheet.compress(Bitmap.CompressFormat.JPEG, 100, out) }
+            Toast.makeText(this, "Print sheet saved: ${file.name}", Toast.LENGTH_SHORT).show()
+
             file
+
         } catch (e: Exception) { null }
+
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

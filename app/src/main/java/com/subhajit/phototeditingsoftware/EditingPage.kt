@@ -5,8 +5,6 @@ import android.content.Intent
 import android.graphics.*
 import android.os.Bundle
 import android.os.Environment
-import android.os.Handler
-import android.os.Looper
 import android.provider.MediaStore
 import android.view.LayoutInflater
 import android.widget.*
@@ -14,10 +12,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.Segmentation
+import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
 import java.io.File
 import java.io.FileOutputStream
 
@@ -60,12 +59,6 @@ class EditingPage : AppCompatActivity() {
         btnBrightness = findViewById(R.id.btnBrightness)
         btnRemoveBg = findViewById(R.id.btnRemoveBg)
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
-        }
-
         val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, documentSizes.keys.toList())
         sizeDropdown.setAdapter(adapter)
         sizeDropdown.setText(documentSizes.keys.first(), false)
@@ -80,46 +73,32 @@ class EditingPage : AppCompatActivity() {
             startActivityForResult(intent, REQUEST_IMAGE_PICK)
         }
 
+        // Find the btnBrightness listener inside EditingPage.kt and update it to this:
+
         btnBrightness.setOnClickListener {
             modifiedBitmap?.let { bitmap ->
-                val helper = BrightnessHelper(this)
-                helper.showBrightnessDialog(bitmap,
-                    onUpdate = { colorFilter, scaleFactor ->
-                        // FAST PREVIEW: No bitmap creation here
+                BrightnessHelper(this).showBrightnessDialog(bitmap,
+                    onUpdate = { colorFilter, scale ->
                         imageView.colorFilter = colorFilter
-                        imageView.scaleX = scaleFactor
-                        imageView.scaleY = scaleFactor
+
+                        // CRITICAL FIX: Ensure the preview uses CENTER_CROP so the
+                        // edges outside the visible area are what gets cut.
+                        imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+
+                        // We scale the view itself to show the user what's being "zoomed in"
+                        imageView.scaleX = scale
+                        imageView.scaleY = scale
                     },
                     onFinalize = { finalBitmap ->
-                        val oldBitmap = modifiedBitmap
-
-                        // Update the reference and UI
-                        modifiedBitmap = finalBitmap
-
-                        // Use an alpha transition or just update instantly
-                        imageView.setImageBitmap(modifiedBitmap)
-
-                        // Reset preview styles so they don't apply to the NEW cropped bitmap
-                        imageView.apply {
-                            colorFilter = null
-                            scaleX = 1.0f
-                            scaleY = 1.0f
-                        }
-
-                        // Free up native memory
-                        if (oldBitmap != null && oldBitmap != finalBitmap && !oldBitmap.isRecycled) {
-                            oldBitmap.recycle()
-                        }
-
-                        // Suggest cleanup to the system
-                        System.gc()
+                        // This updates the global modifiedBitmap with the newly cropped one
+                        updateImage(finalBitmap)
                     }
                 )
-            } ?: showToast("Please upload an image first")
+            } ?: showToast("Upload an image first")
         }
 
         btnRemoveBg.setOnClickListener {
-            if (modifiedBitmap != null) showAiPopup() else showToast("Please upload an image first")
+            modifiedBitmap?.let { runBackgroundRemoval(it) } ?: showToast("Upload an image first")
         }
 
         exportBtn.setOnClickListener {
@@ -132,61 +111,61 @@ class EditingPage : AppCompatActivity() {
         }
     }
 
-    private fun showAiPopup() {
-        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_loading, null)
-        loadingDialog = AlertDialog.Builder(this)
-            .setView(dialogView)
-            .setCancelable(false)
-            .create()
-        loadingDialog?.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        loadingDialog?.show()
+    private fun runBackgroundRemoval(source: Bitmap) {
+        toggleLoading(true)
+        // Fixed: Use setDetectorMode instead of setDetectionMode
+        val options = SelfieSegmenterOptions.Builder()
+            .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+            .build()
 
-        Handler(Looper.getMainLooper()).postDelayed({
-            applyStudioBackground()
-            loadingDialog?.dismiss()
-            showToast("Background refined by AI")
-        }, 2000)
+        val segmenter = Segmentation.getClient(options)
+        val inputImage = InputImage.fromBitmap(source, 0)
+
+        segmenter.process(inputImage)
+            .addOnSuccessListener { segmentationMask ->
+                val mask = segmentationMask.buffer
+                val maskWidth = segmentationMask.width
+                val maskHeight = segmentationMask.height
+
+                val output = source.copy(Bitmap.Config.ARGB_8888, true)
+                val pixels = IntArray(maskWidth * maskHeight)
+                source.getPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
+
+                for (i in 0 until maskWidth * maskHeight) {
+                    val confidence = mask.float
+                    // If confidence is low, it's background -> turn white
+                    if (confidence < 0.85) {
+                        pixels[i] = Color.WHITE
+                    }
+                }
+                output.setPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
+                updateImage(output)
+                toggleLoading(false)
+            }
+            .addOnFailureListener {
+                toggleLoading(false)
+                showToast("Failed to remove background")
+            }
     }
 
-    private fun applyStudioBackground() {
-        modifiedBitmap?.let { src ->
-            val oldBitmap = modifiedBitmap
-            val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(result)
-            canvas.drawColor(Color.WHITE)
-            canvas.drawBitmap(src, 0f, 0f, null)
-
-            modifiedBitmap = result
-            imageView.setImageBitmap(modifiedBitmap)
-
-            if (oldBitmap != null && oldBitmap != result && !oldBitmap.isRecycled) {
-                oldBitmap.recycle()
-            }
+    private fun updateImage(newBitmap: Bitmap) {
+        val old = modifiedBitmap
+        modifiedBitmap = newBitmap
+        imageView.setImageBitmap(modifiedBitmap)
+        // Reset preview states
+        imageView.apply {
+            colorFilter = null
+            scaleX = 1.0f
+            scaleY = 1.0f
+            scaleType = ImageView.ScaleType.FIT_CENTER
         }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_IMAGE_PICK && resultCode == Activity.RESULT_OK) {
-            data?.data?.let { uri ->
-                val rawBitmap = MediaStore.Images.Media.getBitmap(contentResolver, uri)
-                // Ensure we use a mutable ARGB_8888 bitmap for processing
-                val old = modifiedBitmap
-                modifiedBitmap = rawBitmap.copy(Bitmap.Config.ARGB_8888, true)
-                imageView.setImageBitmap(modifiedBitmap)
-                imageView.setPadding(0, 0, 0, 0)
-
-                if (old != null && !old.isRecycled) old.recycle()
-                if (rawBitmap != modifiedBitmap && !rawBitmap.isRecycled) rawBitmap.recycle()
-            }
-        }
+        if (old != null && old != newBitmap) old.recycle()
     }
 
     private fun generatePrintSheet(bitmap: Bitmap, wMm: Float, hMm: Float, count: Int): File? {
         val dpi = 300
         val a4W = 2480
         val a4H = 3508
-
         val sheet = Bitmap.createBitmap(a4W, a4H, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(sheet)
         canvas.drawColor(Color.WHITE)
@@ -209,32 +188,29 @@ class EditingPage : AppCompatActivity() {
             if (currentY + itemH > a4H) break
         }
 
-        // --- NEW SAVING LOGIC START ---
         return try {
-            // Save to the public 'Pictures' folder so Google Photos can see it
-            val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-            if (!publicDir.exists()) publicDir.mkdirs()
-
-            val file = File(publicDir, "PhotoStudio_${System.currentTimeMillis()}.jpg")
-            FileOutputStream(file).use { out ->
-                sheet.compress(Bitmap.CompressFormat.JPEG, 95, out)
-            }
-
-            // CRITICAL: Tell Google Photos/Gallery to scan the new file
-            val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-            val contentUri = android.net.Uri.fromFile(file)
-            mediaScanIntent.data = contentUri
-            sendBroadcast(mediaScanIntent)
-
-            scaledItem.recycle()
-            sheet.recycle()
-
+            val file = File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Passport_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(file).use { out -> sheet.compress(Bitmap.CompressFormat.JPEG, 100, out) }
             file
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
+        } catch (e: Exception) { null }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_IMAGE_PICK && resultCode == Activity.RESULT_OK) {
+            data?.data?.let { uri ->
+                val raw = MediaStore.Images.Media.getBitmap(contentResolver, uri)
+                updateImage(raw.copy(Bitmap.Config.ARGB_8888, true))
+            }
         }
-        // --- NEW SAVING LOGIC END ---
+    }
+
+    private fun toggleLoading(show: Boolean) {
+        if (show) {
+            val view = LayoutInflater.from(this).inflate(R.layout.dialog_loading, null)
+            loadingDialog = AlertDialog.Builder(this).setView(view).setCancelable(false).create()
+            loadingDialog?.show()
+        } else loadingDialog?.dismiss()
     }
 
     private fun shareImage(file: File) {

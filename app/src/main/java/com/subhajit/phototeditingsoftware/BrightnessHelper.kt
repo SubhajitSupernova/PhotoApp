@@ -28,6 +28,9 @@ class BrightnessHelper(private val context: Context) {
         val scaleText = view.findViewById<TextView>(R.id.scaleValue)
         val btnDone = view.findViewById<Button>(R.id.btnDone)
 
+        scaleSeekBar.progress = 0
+        brightnessSeekBar.progress = 100
+
         fun updatePreview() {
             val cm = ColorMatrix(floatArrayOf(
                 currentBrightness, 0f, 0f, 0f, 0f,
@@ -50,7 +53,7 @@ class BrightnessHelper(private val context: Context) {
 
         scaleSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
-                // Adjusting scale range: 1.0x (normal) to 3.0x (zoomed in)
+                // Range 1.0x to 3.0x
                 currentScale = 1.0f + (progress / 100f) * 2.0f
                 scaleText.text = String.format("%.1fx", currentScale)
                 updatePreview()
@@ -60,6 +63,7 @@ class BrightnessHelper(private val context: Context) {
         })
 
         btnDone.setOnClickListener {
+            // APPLY CROP MATH
             val result = applyFinalTransform(currentBitmap, currentBrightness, currentScale)
             onFinalize(result)
             dialog.dismiss()
@@ -70,21 +74,21 @@ class BrightnessHelper(private val context: Context) {
     }
 
     private fun applyFinalTransform(src: Bitmap, brightness: Float, scale: Float): Bitmap {
-        // 1. Calculate the 'Crop' area.
-        // If scale is 2.0, we take only 50% of the image width/height from the center.
-        val cropWidth = (src.width / scale).toInt()
-        val cropHeight = (src.height / scale).toInt()
+        // Step 1: Determine the aspect ratio of the crop area
+        // If your passport size is 35:45, we ensure we crop that ratio
+        val targetWidth = (src.width / scale).toInt()
+        val targetHeight = (src.height / scale).toInt()
 
-        // 2. Find the top-left corner of the crop rectangle (centering it)
-        val left = (src.width - cropWidth) / 2
-        val top = (src.height - cropHeight) / 2
+        // Step 2: Center the crop rect
+        val left = (src.width - targetWidth) / 2
+        val top = (src.height - targetHeight) / 2
+        val right = left + targetWidth
+        val bottom = top + targetHeight
 
-        // 3. Create the output bitmap.
-        // We keep the original dimensions so the print quality stays high.
-        val dest = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        // Step 3: Create the cropped bitmap
+        val dest = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(dest)
 
-        // 4. Apply brightness
         val cm = ColorMatrix(floatArrayOf(
             brightness, 0f, 0f, 0f, 0f,
             0f, brightness, 0f, 0f, 0f,
@@ -96,12 +100,10 @@ class BrightnessHelper(private val context: Context) {
             colorFilter = ColorMatrixColorFilter(cm)
         }
 
-        // 5. Draw the CROPPED section (srcRect) into the FULL destination (destRect)
-        val srcRect = Rect(left, top, left + cropWidth, top + cropHeight)
-        val destRect = Rect(0, 0, src.width, src.height)
+        val srcRect = Rect(left, top, right, bottom)
+        val destRect = Rect(0, 0, targetWidth, targetHeight)
 
         canvas.drawBitmap(src, srcRect, destRect, paint)
-
         return dest
     }
 }

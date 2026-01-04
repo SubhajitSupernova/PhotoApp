@@ -52,29 +52,41 @@
             <HorizontalScrollView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="20dp"
                 android:scrollbars="none">
 
                 <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="4dp">
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRemoveBg"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
+                        android:layout_height="64dp"
+                        android:layout_marginEnd="12dp"
                         android:text="Remove BG"
-                        app:icon="@drawable/ic_auto_fix" />
+                        android:paddingHorizontal="20dp"
+                        app:cornerRadius="16dp"
+                        app:icon="@drawable/ic_auto_fix"
+                        app:iconPadding="12dp"
+                        app:iconSize="20dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnBrightness"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Brighten"
-                        app:icon="@drawable/ic_brightness" />
+                        android:layout_height="64dp"
+                        android:layout_marginEnd="12dp"
+                        android:text="Adjustments"
+                        android:paddingHorizontal="20dp"
+                        app:cornerRadius="16dp"
+                        app:icon="@drawable/ic_brightness"
+                        app:iconPadding="12dp"
+                        app:iconSize="20dp" />
+
                 </LinearLayout>
             </HorizontalScrollView>
 

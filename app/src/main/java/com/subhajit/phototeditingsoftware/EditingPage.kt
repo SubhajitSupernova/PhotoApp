@@ -91,23 +91,28 @@ class EditingPage : AppCompatActivity() {
                         imageView.scaleY = scaleFactor
                     },
                     onFinalize = { finalBitmap ->
-                        // 1. Keep reference to old bitmap
                         val oldBitmap = modifiedBitmap
 
-                        // 2. Assign and set new bitmap
+                        // Update the reference and UI
                         modifiedBitmap = finalBitmap
+
+                        // Use an alpha transition or just update instantly
                         imageView.setImageBitmap(modifiedBitmap)
 
-                        // 3. Reset preview styles
-                        imageView.colorFilter = null
-                        imageView.scaleX = 1.0f
-                        imageView.scaleY = 1.0f
+                        // Reset preview styles so they don't apply to the NEW cropped bitmap
+                        imageView.apply {
+                            colorFilter = null
+                            scaleX = 1.0f
+                            scaleY = 1.0f
+                        }
 
-                        // 4. CRITICAL: Recycle old bitmap memory immediately
+                        // Free up native memory
                         if (oldBitmap != null && oldBitmap != finalBitmap && !oldBitmap.isRecycled) {
                             oldBitmap.recycle()
                         }
-                        System.gc() // Hint garbage collection
+
+                        // Suggest cleanup to the system
+                        System.gc()
                     }
                 )
             } ?: showToast("Please upload an image first")
@@ -204,18 +209,32 @@ class EditingPage : AppCompatActivity() {
             if (currentY + itemH > a4H) break
         }
 
-        scaledItem.recycle() // Clean up the temp scaled image
-
+        // --- NEW SAVING LOGIC START ---
         return try {
-            val file = File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "PrintSheet_${System.currentTimeMillis()}.jpg")
+            // Save to the public 'Pictures' folder so Google Photos can see it
+            val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            if (!publicDir.exists()) publicDir.mkdirs()
+
+            val file = File(publicDir, "PhotoStudio_${System.currentTimeMillis()}.jpg")
             FileOutputStream(file).use { out ->
-                sheet.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                sheet.compress(Bitmap.CompressFormat.JPEG, 95, out)
             }
-            sheet.recycle() // Clean up A4 bitmap
+
+            // CRITICAL: Tell Google Photos/Gallery to scan the new file
+            val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+            val contentUri = android.net.Uri.fromFile(file)
+            mediaScanIntent.data = contentUri
+            sendBroadcast(mediaScanIntent)
+
+            scaledItem.recycle()
+            sheet.recycle()
+
             file
         } catch (e: Exception) {
+            e.printStackTrace()
             null
         }
+        // --- NEW SAVING LOGIC END ---
     }
 
     private fun shareImage(file: File) {

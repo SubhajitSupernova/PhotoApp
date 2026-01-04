@@ -8,15 +8,7 @@
     android:background="@drawable/gradient_bg"
     tools:context=".MainActivity">
 
-    <com.airbnb.lottie.LottieAnimationView
-        android:id="@+id/backgroundDecoration"
-        android:layout_width="match_parent"
-        android:layout_height="200dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:lottie_rawRes="@raw/loading"
-        app:lottie_autoPlay="true"
-        app:lottie_loop="true"
-        android:alpha="0.3" />
+
 
     <com.airbnb.lottie.LottieAnimationView
         android:id="@+id/mainIllustration"
